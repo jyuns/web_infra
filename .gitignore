@@ -2,5 +2,7 @@
 *.tfvars
 *.tfstate
 *.backup
+*.hcl
 
+/.DS_Store
 /.terraform

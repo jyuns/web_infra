@@ -52,11 +52,6 @@ data "aws_availability_zone" "prod_az" {
 	name = "ap-northeast-2a"
 }
 
-
-data "template_file" "docker" {
-	template = file("./user_data/docker.sh")
-}
-
 resource "aws_subnet" "prod_public_subnet" {
 	vpc_id = aws_vpc.prod_vpc.id
 	cidr_block = "10.10.1.0/24"
@@ -90,9 +85,30 @@ resource "aws_security_group" "ssh" {
 	}
 }
 
+resource "aws_security_group" "tcp_jenkins" {
+	name = "allow_tcp_jenkins_from_all"
+	vpc_id = aws_vpc.prod_vpc.id
+	description = "Allow TCP Jenkins port from all"
+	ingress {
+		from_port = 8181
+		to_port = 8181
+		protocol = "tcp"
+		cidr_blocks = ["0.0.0.0/0"]
+	}
+}
+
+
 data "aws_security_group" "prod_default" {
 	name = "default"
 	vpc_id = aws_vpc.prod_vpc.id
+}
+
+data "template_file" "public_instance_init_sh" {
+	template = file("./userData/public_instance_init.sh")
+}
+
+data "template_file" "private_instance_init_sh" {
+	template = file("./userData/private_instance_init.sh")
 }
 
 resource "aws_instance" "prod_public_instance" {
@@ -101,29 +117,17 @@ resource "aws_instance" "prod_public_instance" {
 	key_name = aws_key_pair.educook_kr_admin.key_name
 	vpc_security_group_ids = [
 		aws_security_group.ssh.id,
+		aws_security_group.tcp_jenkins.id,
 		data.aws_security_group.prod_default.id
 	]
 	subnet_id = aws_subnet.prod_public_subnet.id
 	associate_public_ip_address = true
 
-	user_data = <<-EOF
-		#! /bin/bash
-		sudo apt-get update
-		sudo apt-get install -y \
-		ca-certificates \
-		curl \
-		gnupg \
-		lsb-release
+	user_data = data.template_file.public_instance_init_sh.rendered
 
-		sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-
-		sudo echo \
-		"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-		$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-		sudo apt-get update
-		sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-	EOF
+    tags {
+        Name = "educook_public_instance"
+    }
 
 }
 
@@ -139,4 +143,11 @@ resource "aws_instance" "prod_private_instance" {
 	instance_type = "t2.micro"
 	key_name = aws_key_pair.educook_kr_admin.key_name
 	subnet_id = aws_subnet.prod_private_subnet.id
+
+	user_data = data.template_file.private_instance_init_sh.rendered
+
+    tags {
+        Name = "educook_private_instance"
+    }
+
 }
